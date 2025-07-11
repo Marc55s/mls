@@ -1,35 +1,13 @@
 use colored::Colorize;
 use std::env;
-use std::fmt::Debug;
 use std::fs::*;
 // use std::os::unix::fs::PermissionsExt;
 
 #[derive(PartialEq)]
-enum Flags {
+enum Flag {
     All,
     List,
     Empty,
-}
-
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
-enum FileType {
-    File,
-    Dir,
-}
-
-struct ColorText {
-    text: String,
-    file_type: FileType,
-}
-
-impl ColorText {
-    fn print_color(&self) {
-        if self.file_type == FileType::Dir {
-            print!("{} ", self.text.blue())
-        } else {
-            print!("{} ", self.text.yellow())
-        }
-    }
 }
 
 fn is_dotfile(file_name: &str) -> bool {
@@ -48,51 +26,58 @@ fn get_files_from_path(path: &str) -> Vec<String> {
     paths
 }
 
-fn list_files(path: &str, flag: Flags) {
-    let mut dir_names: Vec<ColorText> = Vec::new();
+fn filter_files(path: &str, flags: Flag) -> Vec<String> {
     let files = get_files_from_path(path);
 
-    for p in files {
-        if is_dotfile(&p) && flag != Flags::All {
-            continue;
-        }
-        println!("{:?}", metadata(&p).unwrap().permissions().readonly());
-        println!("{:?}", metadata(&p).unwrap().permissions());
-        println!("{:?}", metadata(&p).unwrap().accessed().unwrap());
-        if metadata(&p).unwrap().is_dir() {
-            let ct = ColorText {
-                text: p,
-                file_type: FileType::Dir,
-            };
-            dir_names.push(ct);
-        } else {
-            let ct = ColorText {
-                text: p.into(),
-                file_type: FileType::File,
-            };
-            dir_names.push(ct);
-        }
-    }
+    let filtered_files: Vec<String> = match flags {
+        Flag::List => files
+            .iter()
+            .filter(|file| !is_dotfile(file))
+            .cloned()
+            .collect(),
+        Flag::Empty => files
+            .iter()
+            .filter(|file| !is_dotfile(file))
+            .cloned()
+            .collect(),
+        Flag::All => files,
+    };
 
-    dir_names.sort_by(|a, b| a.file_type.cmp(&b.file_type));
-    dir_names.iter().for_each(|e| e.print_color());
+    filtered_files
 }
 
-fn unpack_args(args: &Vec<String>) {
-    match args.get(1).map(String::as_str) {
-        Some("-l") => println!("List Arg"),
-        Some("-a") => list_files(".", Flags::All),
-        Some(other) => println!("Unknown argument: {}", other),
-        None => println!("No argument provided"),
-    }
+fn print_colorized_strings(file_names: &mut [String]) {
+    file_names.sort_by_key(|path| {
+        // If metadata fails, treat it as a file (false)
+        metadata(path).map(|m| !m.is_dir()).unwrap_or(true)
+    });
+
+    file_names.iter().map(|s| {
+        if metadata(s).unwrap().is_dir() {
+            s.blue().to_string()
+        }else {
+            s.yellow().to_string()
+        }
+    }).for_each(|p| println!("{}", p));
+}
+
+fn unpack_args(args: &[String]) -> (&str, Flag) {
+    let flag: Flag = match args.get(1).map(String::as_str) {
+        Some("-l") => Flag::List,
+        Some("-a") => Flag::All,
+        Some(_) => Flag::Empty,
+        None => Flag::Empty,
+    };
+    (".", flag)
 }
 
 fn main() {
     let args: Vec<String> = env::args().collect();
+    println!("Received {} args", args.len());
 
-    if args.len() >= 2 {
-        unpack_args(&args);
-    } else {
-        list_files(".", Flags::Empty);
+    if args.len() <= 2 {
+        let (flag, path) = unpack_args(&args);
+        let mut filtered = filter_files(flag, path);
+        print_colorized_strings(&mut filtered);
     }
 }
