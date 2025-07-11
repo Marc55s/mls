@@ -26,6 +26,8 @@
         packages = with pkgs;[
           rustc
           cargo
+          rustfmt
+          clippy
         ];
       };
       formatter.x86_64-linux = treefmt-nix.lib.mkWrapper
