@@ -1,7 +1,6 @@
 use chrono::{DateTime, Local};
 use colored::ColoredString;
 use colored::Colorize;
-use std::env;
 use std::fs::*;
 use std::io;
 use std::os::unix::fs::PermissionsExt;
@@ -12,6 +11,7 @@ use std::time::SystemTime;
 enum Flag {
     All,
     List,
+    AllAndList,
     Empty,
 }
 
@@ -90,14 +90,16 @@ fn get_files_from_path(path: &Path) -> Vec<PathBuf> {
         .collect()
 }
 
-fn filter_files(path: &Path, flags: &Flag) -> Vec<PathBuf> {
+fn filter_files(path: &Path, flag: &Flag) -> Vec<PathBuf> {
     let files = get_files_from_path(path);
 
-    let mut filtered = match flags {
+    // filter dotfiles
+    let mut filtered = match flag {
         Flag::All => files,
         _ => files.into_iter().filter(|file| !is_dotfile(file)).collect(),
     };
-    
+
+    // sort files by dir and no dir
     filtered.sort_by_key(|path| metadata(path).map(|m| !m.is_dir()).unwrap_or(true));
     filtered
 }
@@ -115,34 +117,49 @@ fn print_colorized_strings(file_names: &mut [PathBuf]) {
     }
 }
 
-fn unpack_args(args: &[String]) -> (PathBuf, Flag) {
-    let flag = match args.get(1).map(String::as_str) {
-        Some("-l") => Flag::List,
-        Some("-a") => Flag::All,
-        Some(_) => Flag::Empty,
-        None => Flag::Empty,
+fn unpack_args(args: Args) -> (PathBuf, Flag) {
+    let result = match (args.all, args.long) {
+        (true, true) => Flag::AllAndList,
+        (true, false) => Flag::All,
+        (false, true) => Flag::List,
+        (_, _) => Flag::Empty,
     };
 
-    (PathBuf::from("."), flag)
+    (args.path, result)
+}
+
+use clap::Parser;
+
+#[derive(Parser, Debug)]
+#[command(version, about, long_about = None)]
+struct Args {
+    /// Show hidden files
+    #[arg(short = 'a', long)]
+    all: bool,
+
+    /// Use long listing format
+    #[arg(short = 'l', long)]
+    long: bool,
+
+    /// Directory to list (optional, defaults to current)
+    #[arg(default_value = ".")]
+    path: PathBuf,
 }
 
 fn main() {
-    let args: Vec<String> = env::args().collect();
-    println!("Received {} args", args.len());
+    let args = Args::parse();
+    let (path, flag) = unpack_args(args);
+    let _files = get_files_from_path(path.as_path());
+    let mut filtered_files = filter_files(path.as_path(), &flag);
 
-    if args.len() <= 2 {
-        let (path, flag) = unpack_args(&args);
-        let mut filtered: Vec<PathBuf> = filter_files(&path, &flag);
-
-        if flag == Flag::List {
-            for file in &filtered {
-                match get_file_entry(file) {
-                    Ok(entry) => entry.print(),
-                    Err(e) => println!("Listing detailed file information failed: {}", e),
-                };
-            }
-        } else {
-            print_colorized_strings(&mut filtered);
+    if flag == Flag::List || flag == Flag::AllAndList {
+        for file in filtered_files {
+            match get_file_entry(&file) {
+                Ok(entry) => entry.print(),
+                Err(e) => println!("Listing detailed file information failed: {}", e),
+            };
         }
+    } else {
+        print_colorized_strings(&mut filtered_files);
     }
 }
